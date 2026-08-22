@@ -10,6 +10,11 @@ const userSchema = new mongoose.Schema(
       trim: true,
     },
 
+    name: {
+      type: String,
+      default: "",
+    },
+
     password: {
       type: String,
       default: "",
@@ -29,6 +34,26 @@ const userSchema = new mongoose.Schema(
       type: String,
       enum: ["local", "google"],
       default: "local",
+    },
+
+    profilePic: {
+      type: String,
+      default: "",
+    },
+
+    pendingEmail: {
+      type: String,
+      default: "",
+    },
+
+    emailOtp: {
+      type: String,
+      default: "",
+    },
+
+    emailOtpExpires: {
+      type: Date,
+      default: null,
     },
 
     otp: {

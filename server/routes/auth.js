@@ -1,6 +1,7 @@
 import express from "express";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import verifyToken from "../middleware/authMiddleware.js";
 
 import {
   login,
@@ -9,6 +10,9 @@ import {
   googleLogin,
   forgotPassword,
   resetPassword,
+  updateProfile,
+  requestEmailChange,
+  verifyEmailChange,
 } from "../controllers/authController.js";
 
 const router = express.Router();
@@ -67,13 +71,14 @@ router.post(
 );
 
 router.post("/register", register);
-
 router.post("/verify-otp", verifyOtp);
-
 router.post("/google", googleLogin);
-
 router.post("/forgot-password", forgotPassword);
-
 router.post("/reset-password", resetPassword);
+
+// Protected routes
+router.put("/profile", verifyToken, updateProfile);
+router.post("/request-email-change", verifyToken, requestEmailChange);
+router.post("/verify-email-change", verifyToken, verifyEmailChange);
 
 export default router;

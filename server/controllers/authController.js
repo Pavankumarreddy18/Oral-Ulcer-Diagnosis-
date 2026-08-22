@@ -11,12 +11,22 @@ const signToken = (user) => {
     {
       id: user._id,
       email: user.email,
+      name: user.name,
+      profilePic: user.profilePic || "",
       isAdmin: user.isAdmin,
     },
     process.env.JWT_SECRET,
     { expiresIn: "7d" }
   );
 };
+
+const getUserResponse = (user) => ({
+  _id: user._id,
+  email: user.email,
+  name: user.name || "",
+  profilePic: user.profilePic || "",
+  isAdmin: user.isAdmin,
+});
 
 const sendOtpMail = async (email, otp) => {
   const transporter = nodemailer.createTransport({
@@ -44,10 +54,11 @@ export const register = async (req, res) => {
   try {
     const email = String(req.body.email || "").toLowerCase().trim();
     const password = String(req.body.password || "");
+    const name = String(req.body.name || "").trim();
 
-    if (!email || !password) {
+    if (!email || !password || !name) {
       return res.status(400).json({
-        msg: "Email and password are required",
+        msg: "Name, email and password are required",
       });
     }
 
@@ -74,6 +85,7 @@ export const register = async (req, res) => {
     let user;
 
     if (existingUser && !existingUser.isVerified) {
+      existingUser.name = name;
       existingUser.password = hashedPassword;
       existingUser.otp = otp;
       existingUser.otpExpires = new Date(
@@ -84,6 +96,7 @@ export const register = async (req, res) => {
       user = await existingUser.save();
     } else {
       user = await User.create({
+        name,
         email,
         password: hashedPassword,
         otp,
@@ -163,11 +176,7 @@ export const verifyOtp = async (req, res) => {
     res.json({
       msg: "Email verified successfully",
       token,
-      user: {
-        _id: user._id,
-        email: user.email,
-        isAdmin: user.isAdmin,
-      },
+      user: getUserResponse(user),
     });
 
   } catch (error) {
@@ -205,7 +214,7 @@ export const login = async (req, res) => {
       });
     }
 
-    if (user.authProvider === "google") {
+    if (user.authProvider === "google" && !user.password) {
       return res.status(400).json({
         msg: "Please login with Google",
       });
@@ -226,11 +235,7 @@ export const login = async (req, res) => {
 
     res.json({
       token,
-      user: {
-        _id: user._id,
-        email: user.email,
-        isAdmin: user.isAdmin,
-      },
+      user: getUserResponse(user),
     });
 
   } catch (error) {
@@ -266,6 +271,7 @@ export const googleLogin = async (req, res) => {
 
     if (!user) {
       user = await User.create({
+        name: payload.name,
         email,
         isVerified: true,
         authProvider: "google",
@@ -281,11 +287,7 @@ export const googleLogin = async (req, res) => {
 
     res.json({
       token,
-      user: {
-        _id: user._id,
-        email: user.email,
-        isAdmin: user.isAdmin,
-      },
+      user: getUserResponse(user),
     });
 
   } catch (error) {
@@ -344,5 +346,109 @@ export const resetPassword = async (req, res) => {
     res.json({ msg: "Password reset successful! You can now login.", success: true });
   } catch (error) {
     res.status(500).json({ msg: "Failed to reset password", error: error.message });
+  }
+};
+
+export const updateProfile = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { name, profilePic } = req.body;
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ msg: "User not found" });
+
+    if (name !== undefined) user.name = String(name).trim();
+    if (profilePic !== undefined) user.profilePic = String(profilePic);
+
+    await user.save();
+
+    const token = signToken(user);
+    res.json({
+      msg: "Profile updated successfully",
+      token,
+      user: getUserResponse(user),
+    });
+  } catch (error) {
+    res.status(500).json({ msg: "Failed to update profile", error: error.message });
+  }
+};
+
+export const requestEmailChange = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const newEmail = String(req.body.newEmail || "").toLowerCase().trim();
+
+    if (!newEmail) return res.status(400).json({ msg: "New email is required" });
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ msg: "User not found" });
+
+    if (user.email === newEmail) {
+      return res.status(400).json({ msg: "New email is the same as current email" });
+    }
+
+    const existing = await User.findOne({ email: newEmail });
+    if (existing) {
+      return res.status(400).json({ msg: "An account with this email already exists" });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    user.pendingEmail = newEmail;
+    user.emailOtp = otp;
+    user.emailOtpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
+    await user.save();
+
+    await sendOtpMail(newEmail, otp);
+
+    res.json({
+      msg: `Verification OTP sent to ${newEmail}`,
+      pendingEmail: newEmail,
+      needOtp: true,
+    });
+  } catch (error) {
+    res.status(500).json({ msg: "Failed to request email change", error: error.message });
+  }
+};
+
+export const verifyEmailChange = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { otp } = req.body;
+
+    if (!otp) return res.status(400).json({ msg: "OTP is required" });
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ msg: "User not found" });
+
+    if (!user.pendingEmail) {
+      return res.status(400).json({ msg: "No pending email change request found" });
+    }
+
+    if (String(user.emailOtp).trim() !== String(otp).trim()) {
+      return res.status(400).json({ msg: "Invalid OTP" });
+    }
+
+    if (!user.emailOtpExpires || user.emailOtpExpires < new Date()) {
+      return res.status(400).json({ msg: "OTP has expired" });
+    }
+
+    // Update to new email
+    user.email = user.pendingEmail;
+    user.pendingEmail = "";
+    user.emailOtp = "";
+    user.emailOtpExpires = null;
+    await user.save();
+
+    const token = signToken(user);
+
+    res.json({
+      msg: "Email updated successfully",
+      token,
+      user: getUserResponse(user),
+      success: true,
+    });
+  } catch (error) {
+    res.status(500).json({ msg: "Failed to verify email change", error: error.message });
   }
 };
