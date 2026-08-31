@@ -48,13 +48,14 @@ const predictWithLocalModel = (patientData) => {
   return new Promise((resolve, reject) => {
     const inputJson = JSON.stringify(patientData);
 
-    const child = execFile("python", [PREDICT_SCRIPT], {
-      timeout: 15000,
+    const child = execFile("py", ["-3.11", PREDICT_SCRIPT], {
+      timeout: 60000,
       maxBuffer: 1024 * 1024,
-      shell: true,
     }, (error, stdout, stderr) => {
       if (error) {
         console.error("Model prediction error:", error.message);
+        if (stdout) console.error("Python STDOUT:", stdout.toString());
+        if (stderr) console.error("Python STDERR:", stderr.toString());
         return reject(new Error("Local model prediction failed: " + error.message));
       }
       try {
@@ -191,69 +192,110 @@ router.post("/analyze", verifyToken, async (req, res) => {
     }
 
     // ─── Primary diagnosis (Hybrid Router) ──────────────────
-    let result = "";
+    let result = { primary: "", image: null };
     let riskLevel = "UNKNOWN";
     let urgency = "ROUTINE";
     let modelInfo = null;
 
+    console.log("[MODEL] Running Primary Analysis using Local XGBoost model for:", patientName);
+    
+    // Strip image data before passing to local model to prevent massive stdin buffers
+    const cleanSymptoms = { ...(symptoms || {}) };
+    delete cleanSymptoms.image;
+    
+    const primaryPrediction = await predictWithLocalModel(cleanSymptoms);
+    result.primary = generateReport(
+      primaryPrediction.primary_diagnosis,
+      primaryPrediction.confidence,
+      primaryPrediction.top_predictions,
+      primaryPrediction.risk_level,
+      primaryPrediction.urgency,
+      cleanSymptoms
+    );
+    riskLevel = primaryPrediction.risk_level;
+    urgency = primaryPrediction.urgency;
+    modelInfo = {
+      diagnosis: primaryPrediction.primary_diagnosis,
+      confidence: primaryPrediction.confidence,
+      topPredictions: primaryPrediction.top_predictions,
+      modelVersion: primaryPrediction.model_version,
+    };
+
     if (image && typeof image === "string" && image.startsWith("data:")) {
-      console.log("[MODEL] Image detected. Routing to Gemini Vision...");
+      console.log("[MODEL] Image detected. Extracting parameters with Gemini...");
+      const jsonPrompt = `
+You are an expert oral pathologist. Analyze the provided image of an oral ulcer and extract key visual clinical parameters as a JSON object.
+ONLY output valid JSON. Do not include markdown formatting or extra text.
+
+Extract as many of these fields as possible based solely on the image:
+- size: "Pinpoint", "Small", "Medium", "Large", "Very large"
+- shape: "Round", "Oval", "Irregular"
+- color: "White/Grey", "Yellow", "Red", "Mixed", "Black/Dark"
+- border: "Smooth", "Raised", "Irregular"
+- bleedsEasily: true or false (if obvious bleeding is present)
+- soreLocation: "Inner lip", "Inner cheek", "Tongue (top)", "Tongue (side/bottom)", "Gum", "Roof of mouth", "Floor of mouth"
+- alongBiteLine: true or false
+- hardRaisedEdges: true or false
+- numberOfSores: "1", "2-3", "4-5", "> 5"
+
+Example output:
+{
+  "size": "Medium",
+  "shape": "Oval",
+  "color": "White/Grey",
+  "border": "Raised",
+  "soreLocation": "Inner lip",
+  "numberOfSores": "1"
+}`;
       
-      const userPrompt = messages?.map((m) => m.content).join("\n\n") || "Analyze oral ulcer symptoms and photo.";
-      const finalPrompt = `${systemPrompt}\n\nPatient Information:\n${userPrompt}`;
-      
-      let promptContents = [finalPrompt];
+      let promptContents = [jsonPrompt];
       const matches = image.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
       if (matches) {
         promptContents.push({
-          inlineData: {
-            data: matches[2],
-            mimeType: matches[1],
-          },
+          inlineData: { data: matches[2], mimeType: matches[1] },
         });
       }
       
-      result = await callGeminiVision(promptContents);
-      
-      const riskMatch = result.match(/RISK LEVEL:\s*([^\n]+)/i);
-      if (riskMatch) riskLevel = riskMatch[1].trim();
-      
-      const urgencyMatch = result.match(/URGENCY:\s*([^\n]+)/i);
-      if (urgencyMatch) urgency = urgencyMatch[1].trim();
-      
-      modelInfo = {
-        diagnosis: "Gemini Multimodal",
-        confidence: 1.0,
-        topPredictions: [],
-        modelVersion: "gemini-2.5-flash",
-      };
-      
-    } else {
-      console.log("[MODEL] No image. Routing to Local XGBoost model for:", patientName);
+      try {
+        const geminiOutput = await callGeminiVision(promptContents);
+        const cleanJsonString = geminiOutput.replace(/```json/gi, '').replace(/```/gi, '').trim();
+        const extractedParams = JSON.parse(cleanJsonString);
+        console.log("[MODEL] Gemini extracted parameters:", extractedParams);
+        
+        // Run XGBoost again using only the image-extracted parameters
+        // Run XGBoost again using only the image-extracted parameters
+        const imagePrediction = await predictWithLocalModel(extractedParams);
+        
+        console.log("[MODEL] Generating custom Gemini report for image prediction...");
+        const reportPrompt = `
+You are an expert oral pathologist AI. 
+The underlying analytical model has evaluated the visual features of the patient's ulcer and made the following definitive diagnosis:
+- Diagnosis: ${imagePrediction.primary_diagnosis}
+- Risk Level: ${imagePrediction.risk_level}
+- Urgency: ${imagePrediction.urgency}
 
-      const prediction = await predictWithLocalModel(symptoms || {});
+Visual features identified:
+${JSON.stringify(extractedParams, null, 2)}
 
-      console.log("[MODEL] Prediction:", prediction.primary_diagnosis,
-        "| Confidence:", (prediction.confidence * 100).toFixed(1) + "%");
+Write a structured 9-section clinical report validating this diagnosis. 
+You MUST NOT contradict the provided diagnosis, risk level, or urgency. They are final.
+Your report should focus on how the visual features align with the diagnosis.
 
-      result = generateReport(
-        prediction.primary_diagnosis,
-        prediction.confidence,
-        prediction.top_predictions,
-        prediction.risk_level,
-        prediction.urgency,
-        symptoms || {}
-      );
-      
-      riskLevel = prediction.risk_level;
-      urgency = prediction.urgency;
-      
-      modelInfo = {
-        diagnosis: prediction.primary_diagnosis,
-        confidence: prediction.confidence,
-        topPredictions: prediction.top_predictions,
-        modelVersion: prediction.model_version,
-      };
+FORMATTING RULES (CRITICAL):
+1. ONLY the 9 section titles should be UPPERCASE.
+2. The explanation text MUST be in regular sentence case (e.g., "This condition requires..."). DO NOT write explanations in all-caps.
+3. ALWAYS put the explanation/details on a NEW LINE starting with a bullet point (-). Do NOT put explanations on the same line as the section title.
+
+Example Format:
+4. RISK LEVEL: MODERATE
+- Requires prompt evaluation to identify the causative agent...
+`;
+        const generatedText = await callGeminiVision([systemPrompt, reportPrompt]);
+        result.image = generatedText.trim();
+      } catch (err) {
+        console.error("[MODEL] Image parameter extraction or prediction failed:", err);
+        result.image = "Image analysis failed to extract valid clinical parameters.";
+      }
     }
 
     // Handle image upload

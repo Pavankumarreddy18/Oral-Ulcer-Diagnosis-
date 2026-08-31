@@ -70,7 +70,7 @@ export default function DashboardScreen({ navigation }) {
       <LinearGradient 
         colors={['#4f46e5', '#a855f7']} 
         start={{x: 0, y: 0}} end={{x: 1, y: 1}}
-        style={[styles.headerGradient, { paddingTop: Math.max(insets.top, 20) }]}
+        style={[styles.headerGradient, { paddingTop: Math.max(insets.top, 20) + 16 }]}
       >
         <View style={styles.headerTop}>
           <View style={styles.brand}>
@@ -243,7 +243,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 24,
     elevation: 5,
-    marginTop: -30,
+    marginTop: 10,
     borderWidth: 1,
     borderColor: '#f1f5f9',
     marginBottom: 30,

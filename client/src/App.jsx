@@ -60,10 +60,10 @@ const extractMeta = (text = "") => {
   return { category, risk, urgency };
 };
 
-const generateMedicalPDF = async ({ patientName, result, imageUrl }, action = 'download') => {
+const generateMedicalPDF = async ({ patientName, primaryResult, imageResult, imageUrl }, action = 'download') => {
   try {
     const doc = new jsPDF();
-    const meta = extractMeta(result);
+    const meta = extractMeta(primaryResult);
     const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
     // Header Banner
@@ -113,11 +113,11 @@ const generateMedicalPDF = async ({ patientName, result, imageUrl }, action = 'd
       }
     }
 
-    // Diagnostic Header
+    // Primary Diagnostic Header
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
     doc.setTextColor(79, 70, 229);
-    doc.text("AI DIAGNOSIS & CLINICAL EVALUATION:", 14, currentY);
+    doc.text("PRIMARY ANALYSIS (SYMPTOMS):", 14, currentY);
     currentY += 8;
 
     // Diagnostic Content
@@ -125,10 +125,10 @@ const generateMedicalPDF = async ({ patientName, result, imageUrl }, action = 'd
     doc.setFontSize(9.5);
     doc.setTextColor(30, 41, 59);
 
-    const cleanText = result ? result.replace(/[*#]/g, '') : "No diagnostic findings.";
-    const splitText = doc.splitTextToSize(cleanText, 180);
+    const cleanPrimaryText = primaryResult ? primaryResult.replace(/[*#]/g, '') : "No diagnostic findings.";
+    const splitPrimaryText = doc.splitTextToSize(cleanPrimaryText, 180);
 
-    splitText.forEach(line => {
+    splitPrimaryText.forEach(line => {
       if (currentY > 275) {
         doc.addPage();
         currentY = 20;
@@ -136,6 +136,34 @@ const generateMedicalPDF = async ({ patientName, result, imageUrl }, action = 'd
       doc.text(line, 14, currentY);
       currentY += 5;
     });
+
+    if (imageResult) {
+      currentY += 8;
+      if (currentY > 265) {
+        doc.addPage();
+        currentY = 20;
+      }
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.setTextColor(79, 70, 229);
+      doc.text("IMAGE-DRIVEN ANALYSIS:", 14, currentY);
+      currentY += 8;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9.5);
+      doc.setTextColor(30, 41, 59);
+      
+      const cleanImageText = imageResult.replace(/[*#]/g, '');
+      const splitImageText = doc.splitTextToSize(cleanImageText, 180);
+      splitImageText.forEach(line => {
+        if (currentY > 275) {
+          doc.addPage();
+          currentY = 20;
+        }
+        doc.text(line, 14, currentY);
+        currentY += 5;
+      });
+    }
 
     // Medical Disclaimer Footer
     if (currentY > 265) {
@@ -1096,13 +1124,13 @@ function FormattedAIReport({ text }) {
     const trimmed = line.trim();
     if (!trimmed || trimmed === "---") return;
 
-    const headerMatch = trimmed.match(/^(\d+\.\s*)?(MOST LIKELY DIAGNOSIS|DIFFERENTIAL DIAGNOSES|ULCER CATEGORY|RISK LEVEL|URGENCY|KEY FINDINGS|RED FLAGS|RECOMMENDED ACTION|RECOMMENDED ACTIONS|DISCLAIMER)[:\s*]*/i);
+    const headerMatch = trimmed.match(/^([-*•]\s*)?(\d+\.\s*)?(MOST LIKELY DIAGNOSIS|DIFFERENTIAL DIAGNOSES|ULCER CATEGORY|RISK LEVEL|URGENCY|KEY FINDINGS|RED FLAGS|RECOMMENDED ACTION|RECOMMENDED ACTIONS|DISCLAIMER)[:\s*-]*/i);
 
-    if (headerMatch && trimmed.length < 80) {
+    if (headerMatch) {
       if (currentBlock.content.length > 0 || currentBlock.title) {
         blocks.push(currentBlock);
       }
-      currentBlock = { title: trimmed.replace(/[*#]/g, '').trim(), content: [] };
+      currentBlock = { title: trimmed.replace(/^[#*•\-\s]+/, '').trim(), content: [] };
     } else {
       currentBlock.content.push(trimmed.replace(/^[-*•]\s*/, ''));
     }
@@ -1152,7 +1180,10 @@ function FormattedAIReport({ text }) {
 
 // ─── Result Screen ────────────────────────────────────────────────────────────
 function ResultScreen({ recordId, result, patientName, imageUrl, onBack, onDashboard }) {
-  const meta = extractMeta(result);
+  const isDual = typeof result === 'object' && result !== null;
+  const primaryResult = isDual ? result.primary : result;
+  const imageResult = isDual ? result.image : null;
+  const meta = extractMeta(primaryResult);
   const [chat, setChat] = useState([{ role: "ai", content: "Analysis complete! Feel free to ask any follow-up questions." }]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
@@ -1178,7 +1209,7 @@ function ResultScreen({ recordId, result, patientName, imageUrl, onBack, onDashb
     setChat(newChat); setChatLoading(true);
     try {
       const history = newChat.map(m => ({ role: m.role === "ai" ? "assistant" : "user", content: m.content }));
-      history[0] = { role: "user", content: `[Analysis: ${result}]\n\nQuestion: ${history[0].content}` };
+      history[0] = { role: "user", content: `[Primary Analysis: ${primaryResult}]\n[Image Analysis: ${imageResult || 'None'}]\n\nQuestion: ${history[0].content}` };
       const data = await api("/api/ulcer/analyze", "POST", {
         messages: history, systemPrompt: SYSTEM_PROMPT,
         symptoms: {}, patientName, saveRecord: false,
@@ -1198,31 +1229,43 @@ function ResultScreen({ recordId, result, patientName, imageUrl, onBack, onDashb
         </div>
       </div>
 
-      <div className="result-body">
-        <div className="result-card">
-          <div className="result-card-title">🤖 Assessment Report</div>
-          <div className="result-meta-row">
-            <span className="category-badge">Type: {meta.category}</span>
-            <span className={`risk-badge ${String(meta.risk).toLowerCase()}`}>Risk: {meta.risk}</span>
-            <span className="urgency-badge">Urgency: {meta.urgency}</span>
-            <button className="btn-small-primary" onClick={() => generateMedicalPDF({ patientName, result, imageUrl })}>📄 Download PDF Report</button>
-            <button className="btn-small-primary" onClick={() => generateMedicalPDF({ patientName, result, imageUrl }, 'share')} style={{ marginLeft: "8px", background: "#10b981", border: "1px solid #10b981" }}>📤 Share PDF</button>
-            {recordId && <button className="btn-small-primary" onClick={() => setShowEmailDialog(true)} style={{ marginLeft: "8px", background: "#4f46e5", border: "1px solid #4f46e5" }}>✉️ Email to Doctor</button>}
-          </div>
-          <div className="result-success">
-            <span className="result-check">✅</span>
-            <div>
-              <strong>Analysis Complete</strong>
-              <p>Your comprehensive assessment has been analyzed</p>
+      <div className="result-body" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '24px' }}>
+          
+          {/* Primary Analysis Card */}
+          <div className="result-card" style={{ height: '100%', marginBottom: 0 }}>
+            <div className="result-card-title">🤖 Primary Analysis (Symptoms)</div>
+            <div className="result-meta-row" style={{ flexWrap: 'wrap' }}>
+              <span className="category-badge">Type: {meta.category}</span>
+              <span className={`risk-badge ${String(meta.risk).toLowerCase()}`}>Risk: {meta.risk}</span>
+              <span className="urgency-badge">Urgency: {meta.urgency}</span>
+              <button className="btn-small-primary" onClick={() => generateMedicalPDF({ patientName, result: primaryResult, imageUrl })} style={{ marginTop: '8px' }}>📄 Download PDF</button>
+              {recordId && <button className="btn-small-primary" onClick={() => setShowEmailDialog(true)} style={{ marginLeft: "8px", marginTop: '8px', background: "#4f46e5", border: "1px solid #4f46e5" }}>✉️ Email to Doctor</button>}
             </div>
+            <FormattedAIReport text={primaryResult} />
           </div>
-          {imageUrl && (
-            <div className="result-uploaded-photo">
-              <div className="photo-preview-title">📷 Uploaded Ulcer Photo</div>
-              <img src={imageUrl} alt="Uploaded Ulcer" className="result-photo-thumb" />
-            </div>
-          )}
-          <FormattedAIReport text={result} />
+
+          {/* Image-Driven Analysis Card */}
+          <div className="result-card" style={{ height: '100%', marginBottom: 0 }}>
+            <div className="result-card-title">📷 Image-Driven Analysis</div>
+            {imageResult ? (
+              <>
+                {imageUrl && (
+                  <div className="result-uploaded-photo" style={{ marginBottom: '20px' }}>
+                    <img src={imageUrl} alt="Uploaded Ulcer" className="result-photo-thumb" style={{ width: '100%', maxHeight: '200px', objectFit: 'cover', borderRadius: '12px' }} />
+                  </div>
+                )}
+                <FormattedAIReport text={imageResult} />
+              </>
+            ) : (
+              <div style={{ padding: '40px 20px', textAlign: 'center', color: '#64748b', background: '#f8fafc', borderRadius: '12px', border: '2px dashed #cbd5e1', marginTop: '16px' }}>
+                <span style={{ fontSize: '32px', display: 'block', marginBottom: '12px' }}>🖼️</span>
+                <strong>No photo uploaded</strong>
+                <p style={{ marginTop: '8px', fontSize: '14px' }}>Image parameter analysis is unavailable.</p>
+              </div>
+            )}
+          </div>
+          
         </div>
 
         {showEmailDialog && (

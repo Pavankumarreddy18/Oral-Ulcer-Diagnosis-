@@ -350,7 +350,7 @@ HAS ATTACHED PHOTO: ${f.image ? "YES" : "No"}
         <LinearGradient 
           colors={['#4f46e5', '#8b5cf6']} 
           start={{x: 0, y: 0}} end={{x: 1, y: 0}}
-          style={[styles.header, { paddingTop: Math.max(insets.top, 20) }]}
+          style={[styles.header, { paddingTop: Math.max(insets.top, 20) + 16 }]}
         >
           <View style={styles.headerTop}>
             <TouchableOpacity style={styles.backButton} onPress={handlePrev}>

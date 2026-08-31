@@ -13,12 +13,12 @@ const patientRecordSchema = new mongoose.Schema(
     },
 
     diagnosis: {
-      type: String,
+      type: mongoose.Schema.Types.Mixed,
       default: "",
     },
 
     aiResponse: {
-      type: String,
+      type: mongoose.Schema.Types.Mixed,
       default: "",
     },
 

@@ -7,22 +7,24 @@ import {
 import { AntDesign, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../api';
 import { AuthContext } from '../context/AuthContext';
 import { ThemeContext } from '../context/ThemeContext';
 
-GoogleSignin.configure({
-  webClientId: '686103643374-qkr3j4ld2ltck2c2dt03d0ndj91jkcjl.apps.googleusercontent.com',
-  scopes: ['profile', 'email'],
-});
+WebBrowser.maybeCompleteAuthSession();
 
 export default function AuthScreen() {
   const { signIn } = React.useContext(AuthContext);
   const { colors, fs } = React.useContext(ThemeContext);
   const insets = useSafeAreaInsets();
   
+  const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
+    clientId: '686103643374-qkr3j4ld2ltck2c2dt03d0ndj91jkcjl.apps.googleusercontent.com',
+  });
+
   const [mode, setMode] = useState('login'); // 'login' | 'register' | 'forgot'
   const [otpStep, setOtpStep] = useState(false);
   const [email, setEmail] = useState('');
@@ -48,6 +50,24 @@ export default function AuthScreen() {
     };
     loadCredentials();
   }, []);
+
+  useEffect(() => {
+    if (response?.type === 'success') {
+      const { id_token } = response.params;
+      if (id_token) {
+        setLoading(true);
+        api("/api/auth/google", "POST", { credential: id_token })
+          .then(data => {
+            if (data.token) signIn(data);
+            else setError(data.msg || "Google login failed");
+          })
+          .catch(err => setError(err.message || "Google sign in error"))
+          .finally(() => setLoading(false));
+      }
+    } else if (response?.type === 'error') {
+      setError(response.error?.message || "Google sign in cancelled or failed");
+    }
+  }, [response]);
 
   const handleAuth = async () => {
     Keyboard.dismiss();
@@ -93,25 +113,9 @@ export default function AuthScreen() {
     setLoading(false);
   };
 
-  const handleGoogleSignIn = async () => {
-    try {
-      await GoogleSignin.hasPlayServices();
-      try { await GoogleSignin.signOut(); } catch (e) {}
-      
-      const response = await GoogleSignin.signIn();
-      const idToken = response.data ? response.data.idToken : response.idToken;
-      
-      if (!idToken) throw new Error("No ID token returned");
-
-      setLoading(true);
-      const data = await api("/api/auth/google", "POST", { credential: idToken });
-      
-      if (data.token) signIn(data);
-      else setError(data.msg || "Google login failed");
-    } catch (err) {
-      if (err.code !== statusCodes.SIGN_IN_CANCELLED) setError(err.message || "Google sign in error");
-    } finally {
-      setLoading(false);
+  const handleGoogleSignIn = () => {
+    if (request) {
+      promptAsync();
     }
   };
 
@@ -193,8 +197,8 @@ export default function AuthScreen() {
                 placeholderTextColor={colors.textSecondary}
                 autoCapitalize="none"
                 keyboardType="email-address"
-                textContentType="username"
-                autoComplete="username"
+                textContentType="emailAddress"
+                autoComplete="email"
                 importantForAutofill="yes"
                 value={email}
                 onChangeText={setEmail}

@@ -47,7 +47,7 @@ export default function HistoryScreen({ navigation }) {
       <LinearGradient 
         colors={['#0ea5e9', '#3b82f6']} 
         start={{x: 0, y: 0}} end={{x: 1, y: 1}}
-        style={[styles.headerGradient, { paddingTop: Math.max(insets.top, 20) }]}
+        style={[styles.headerGradient, { paddingTop: Math.max(insets.top, 20) + 16 }]}
       >
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Text style={[styles.backButtonText, { fontSize: fs(32) }]}>‹</Text>
@@ -114,7 +114,7 @@ const styles = StyleSheet.create({
   },
   searchContainer: {
     paddingHorizontal: 24,
-    marginTop: -28,
+    marginTop: 10,
     marginBottom: 16,
   },
   searchInput: {

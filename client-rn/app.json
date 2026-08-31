@@ -3,6 +3,7 @@
     "name": "client-rn",
     "slug": "client-rn",
     "version": "1.0.0",
+    "scheme": "oudsapp",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -26,8 +27,10 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "plugins": [
-      "@react-native-google-signin/google-signin"
-    ]
+    "extra": {
+      "eas": {
+        "projectId": "33eec551-e46d-4978-b249-d86a65efd27b"
+      }
+    }
   }
 }

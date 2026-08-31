@@ -34,7 +34,7 @@ export default function SettingsScreen({ navigation }) {
       <LinearGradient 
         colors={['#64748b', '#334155']} 
         start={{x: 0, y: 0}} end={{x: 1, y: 1}}
-        style={[styles.headerGradient, { paddingTop: Math.max(insets.top, 20) }]}
+        style={[styles.headerGradient, { paddingTop: Math.max(insets.top, 20) + 16 }]}
       >
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Text style={[styles.backButtonText, { fontSize: fs(32) }]}>‹</Text>
