@@ -1,0 +1,22 @@
+{
+  "name": "oudse2e",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "mocha tests/mega_web_1100.test.js --reporter ./utils/excelReporter.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "chromedriver": "^152.0.2",
+    "exceljs": "^4.4.0",
+    "mocha": "^12.0.0",
+    "selenium-webdriver": "^4.48.0"
+  }
+}
