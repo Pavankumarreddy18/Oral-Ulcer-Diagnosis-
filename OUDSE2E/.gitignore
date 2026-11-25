@@ -1,0 +1,4 @@
+node_modules/
+Test_Results/selenium-report.xlsx
+Test_Results/HTML/execution-report.html
+Test_Results/Security/
